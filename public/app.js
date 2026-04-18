@@ -13,6 +13,8 @@ const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentUser     = null;
 let currentGameId   = null;
 let currentGameData = null;
+let moonPlayerId    = null;
+let jodPlayerId     = null;
 
 /* ── Views ── */
 function showView(id) {
@@ -39,12 +41,8 @@ function initAuth() {
     const password = document.getElementById('login-password').value;
     const errEl    = document.getElementById('login-error');
     errEl.classList.add('hidden');
-
     const { error } = await db.auth.signInWithPassword({ email, password });
-    if (error) {
-      errEl.textContent = error.message;
-      errEl.classList.remove('hidden');
-    }
+    if (error) { errEl.textContent = error.message; errEl.classList.remove('hidden'); }
   });
 
   document.getElementById('form-register').addEventListener('submit', async e => {
@@ -55,7 +53,6 @@ function initAuth() {
     const okEl     = document.getElementById('register-success');
     errEl.classList.add('hidden');
     okEl.classList.add('hidden');
-
     const { data, error } = await db.auth.signUp({ email, password });
     if (error) {
       errEl.textContent = error.message;
@@ -67,8 +64,9 @@ function initAuth() {
   });
 }
 
-async function logout() {
-  await db.auth.signOut();
+function initDashboard() {
+  document.getElementById('btn-logout').addEventListener('click', () => db.auth.signOut());
+  document.getElementById('btn-new-game').addEventListener('click', () => showView('view-new-game'));
 }
 
 /* ── Dashboard ── */
@@ -76,12 +74,10 @@ async function showDashboard() {
   showView('view-dashboard');
   document.getElementById('dash-username').textContent = currentUser.email.split('@')[0];
 
-  const { data: rawGames, error } = await db
+  const { data: rawGames } = await db
     .from('games')
     .select('id, name, created_at, completed_at, is_complete, game_players(id), rounds(id)')
     .order('created_at', { ascending: false });
-
-  if (error) return;
 
   const games = (rawGames || []).map(g => ({
     ...g,
@@ -90,7 +86,7 @@ async function showDashboard() {
   }));
 
   const list = document.getElementById('games-list');
-  if (games.length === 0) {
+  if (!games.length) {
     list.innerHTML = '<p class="empty-state">No games yet. Start a new one!</p>';
     return;
   }
@@ -117,11 +113,6 @@ async function showDashboard() {
   list.querySelectorAll('.game-card').forEach(card => {
     card.addEventListener('click', () => openGame(Number(card.dataset.id)));
   });
-}
-
-function initDashboard() {
-  document.getElementById('btn-logout').addEventListener('click', logout);
-  document.getElementById('btn-new-game').addEventListener('click', () => showView('view-new-game'));
 }
 
 /* ── New Game ── */
@@ -152,7 +143,6 @@ function initNewGame() {
       .map(i => i.value.trim()).filter(Boolean);
     const errEl = document.getElementById('new-game-error');
     errEl.classList.add('hidden');
-
     try {
       const id = await createGame(name, players);
       resetNewGameForm();
@@ -177,23 +167,18 @@ function updatePlayerButtons() {
   document.getElementById('btn-remove-player').disabled = count <= 2;
 }
 
-/* ── Game CRUD (Supabase) ── */
+/* ── Supabase CRUD ── */
 async function createGame(name, players) {
   if (!name) throw new Error('Game name is required');
   if (players.length < 2 || players.length > 6) throw new Error('2–6 players required');
 
-  const { data: game, error } = await db
-    .from('games')
-    .insert({ name })
-    .select()
-    .single();
+  const { data: game, error } = await db.from('games').insert({ name }).select().single();
   if (error) throw new Error(error.message);
 
-  const { error: playerErr } = await db.from('game_players').insert(
-    players.map((playerName, i) => ({ game_id: game.id, name: playerName, position: i }))
+  const { error: pe } = await db.from('game_players').insert(
+    players.map((n, i) => ({ game_id: game.id, name: n, position: i }))
   );
-  if (playerErr) throw new Error(playerErr.message);
-
+  if (pe) throw new Error(pe.message);
   return game.id;
 }
 
@@ -204,7 +189,6 @@ async function fetchGame(id) {
     .eq('id', id)
     .single();
   if (error || !data) return null;
-
   return {
     ...data,
     players: [...data.game_players].sort((a, b) => a.position - b.position),
@@ -215,45 +199,28 @@ async function fetchGame(id) {
 }
 
 async function saveRound(gameId, scores) {
-  const { data: lastRound } = await db
-    .from('rounds')
-    .select('round_number')
-    .eq('game_id', gameId)
-    .order('round_number', { ascending: false })
-    .limit(1)
-    .single();
+  const { data: last } = await db
+    .from('rounds').select('round_number').eq('game_id', gameId)
+    .order('round_number', { ascending: false }).limit(1).single();
 
-  const roundNumber = ((lastRound?.round_number) || 0) + 1;
-
+  const roundNumber = ((last?.round_number) || 0) + 1;
   const { data: round, error } = await db
-    .from('rounds')
-    .insert({ game_id: gameId, round_number: roundNumber })
-    .select()
-    .single();
+    .from('rounds').insert({ game_id: gameId, round_number: roundNumber }).select().single();
   if (error) throw new Error(error.message);
 
-  const { error: scoreErr } = await db.from('round_scores').insert(
+  const { error: se } = await db.from('round_scores').insert(
     scores.map(({ playerId, score }) => ({ round_id: round.id, player_id: playerId, score }))
   );
-  if (scoreErr) throw new Error(scoreErr.message);
+  if (se) throw new Error(se.message);
 }
 
 async function undoLastRound(gameId) {
-  const { data: lastRound, error } = await db
-    .from('rounds')
-    .select('id')
-    .eq('game_id', gameId)
-    .order('round_number', { ascending: false })
-    .limit(1)
-    .single();
-  if (error || !lastRound) throw new Error('No rounds to undo');
-
-  await db.from('rounds').delete().eq('id', lastRound.id);
+  const { data: last, error } = await db
+    .from('rounds').select('id').eq('game_id', gameId)
+    .order('round_number', { ascending: false }).limit(1).single();
+  if (error || !last) throw new Error('No rounds to undo');
+  await db.from('rounds').delete().eq('id', last.id);
   await db.from('games').update({ is_complete: false, completed_at: null }).eq('id', gameId);
-}
-
-async function removeGame(gameId) {
-  await db.from('games').delete().eq('id', gameId);
 }
 
 /* ── Game View ── */
@@ -266,65 +233,64 @@ async function openGame(id) {
 
 function renderGame() {
   const g = currentGameData;
-  document.getElementById('game-title').textContent = g.name;
+
+  document.getElementById('game-hero-name').textContent = g.name.toUpperCase();
 
   const banner = document.getElementById('game-complete-banner');
-  const addBtn = document.getElementById('btn-add-round');
-
   if (g.is_complete) {
     banner.classList.remove('hidden');
-    addBtn.disabled = true;
     const winner = getWinner(g);
     document.getElementById('game-winner-text').textContent =
-      `Game Over — ${escHtml(winner.name)} wins with ${winner.total} points!`;
+      `${escHtml(winner.name)} wins with ${winner.total} points!`;
   } else {
     banner.classList.add('hidden');
-    addBtn.disabled = false;
   }
 
   renderScoreTable(g);
+  renderRoundEntry(g);
 }
 
 function calcTotals(g) {
   const totals = {};
   g.players.forEach(p => { totals[p.id] = 0; });
-  g.rounds.forEach(round => {
-    (round.scores || []).forEach(s => {
-      totals[s.player_id] = (totals[s.player_id] || 0) + s.score;
-    });
-  });
+  g.rounds.forEach(r => (r.scores || []).forEach(s => {
+    totals[s.player_id] = (totals[s.player_id] || 0) + s.score;
+  }));
   return totals;
 }
 
 function getWinner(g) {
   const totals = calcTotals(g);
-  const best = g.players.reduce((a, b) => (totals[a.id] <= totals[b.id] ? a : b));
+  const best = g.players.reduce((a, b) => totals[a.id] <= totals[b.id] ? a : b);
   return { ...best, total: totals[best.id] };
 }
 
 function renderScoreTable(g) {
   document.getElementById('score-header').innerHTML =
-    '<th>Round</th>' + g.players.map(p => `<th>${escHtml(p.name)}</th>`).join('');
+    '<th class="round-col">#</th>' +
+    g.players.map(p => `<th>${escHtml(p.name)}</th>`).join('');
 
   const body = document.getElementById('score-body');
-  if (g.rounds.length === 0) {
-    body.innerHTML = `<tr><td colspan="${g.players.length + 1}" class="empty-state">No rounds yet.</td></tr>`;
+  if (!g.rounds.length) {
+    body.innerHTML = `<tr><td class="empty-cell" colspan="${g.players.length + 1}">No rounds yet — add the first one below</td></tr>`;
   } else {
     body.innerHTML = g.rounds.map(round => {
       const cells = g.players.map(p => {
         const s = (round.scores || []).find(sc => sc.player_id === p.id);
         return `<td>${s != null ? s.score : '—'}</td>`;
       }).join('');
-      return `<tr><td>${round.round_number}</td>${cells}</tr>`;
+      return `<tr><td class="round-col">${round.round_number}</td>${cells}</tr>`;
     }).join('');
   }
 
   const totals   = calcTotals(g);
-  const minTotal = Math.min(...g.players.map(p => totals[p.id] || 0));
-  const maxTotal = Math.max(...g.players.map(p => totals[p.id] || 0));
+  const vals     = g.players.map(p => totals[p.id] || 0);
+  const minTotal = Math.min(...vals);
+  const maxTotal = Math.max(...vals);
 
   document.getElementById('score-totals').innerHTML =
-    '<td>Total</td>' + g.players.map(p => {
+    '<td class="round-col">Total</td>' +
+    g.players.map(p => {
       const t = totals[p.id] || 0;
       let cls = '';
       if (g.is_complete && t === minTotal) cls = 'winner-col';
@@ -333,14 +299,62 @@ function renderScoreTable(g) {
     }).join('');
 }
 
-function initGameView() {
-  document.getElementById('btn-back-from-game').addEventListener('click', () => {
-    currentGameId   = null;
-    currentGameData = null;
-    showDashboard();
+function renderRoundEntry(g) {
+  const entryEl = document.getElementById('round-entry');
+  if (g.is_complete) { entryEl.classList.add('hidden'); return; }
+  entryEl.classList.remove('hidden');
+
+  moonPlayerId = null;
+  jodPlayerId  = null;
+
+  document.getElementById('next-round-num').textContent = g.rounds.length + 1;
+  document.getElementById('round-entry-error').classList.add('hidden');
+
+  const makeBtns = (containerId, onSelect) => {
+    const el = document.getElementById(containerId);
+    el.innerHTML = g.players.map(p =>
+      `<button type="button" class="player-select-btn" data-id="${p.id}">${escHtml(p.name)}</button>`
+    ).join('');
+    el.querySelectorAll('.player-select-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id);
+        const already = btn.classList.contains('selected');
+        el.querySelectorAll('.player-select-btn').forEach(b => b.classList.remove('selected'));
+        onSelect(already ? null : id);
+        if (!already) btn.classList.add('selected');
+      });
+    });
+  };
+
+  makeBtns('moon-player-btns', id => {
+    moonPlayerId = id;
+    if (id !== null) {
+      document.querySelectorAll('.score-number-input').forEach(inp => {
+        inp.value = Number(inp.dataset.id) === id ? 0 : 26;
+      });
+    } else {
+      document.querySelectorAll('.score-number-input').forEach(inp => { inp.value = 0; });
+    }
   });
 
-  document.getElementById('btn-add-round').addEventListener('click', openRoundModal);
+  makeBtns('jod-player-btns', id => { jodPlayerId = id; });
+
+  const playerCount = g.players.length;
+  document.getElementById('score-input-container').innerHTML = `
+    <div class="score-grid" style="grid-template-columns: repeat(${playerCount}, 1fr)">
+      ${g.players.map(p => `
+        <div class="score-col">
+          <div class="score-col-label">${escHtml(p.name)}</div>
+          <input type="number" class="score-number-input" data-id="${p.id}" min="-10" max="52" value="0" />
+        </div>`).join('')}
+    </div>`;
+}
+
+function initGameView() {
+  document.getElementById('btn-back-from-game').addEventListener('click', () => {
+    currentGameId = null; currentGameData = null;
+    showDashboard();
+  });
 
   document.getElementById('btn-undo-round').addEventListener('click', async () => {
     if (!confirm('Undo the last round?')) return;
@@ -353,81 +367,22 @@ function initGameView() {
 
   document.getElementById('btn-delete-game').addEventListener('click', async () => {
     if (!confirm('Delete this game permanently?')) return;
-    await removeGame(currentGameId);
-    currentGameId   = null;
-    currentGameData = null;
+    await db.from('games').delete().eq('id', currentGameId);
+    currentGameId = null; currentGameData = null;
     showDashboard();
   });
-}
 
-/* ── Round Modal ── */
-function openRoundModal() {
-  const g = currentGameData;
+  document.getElementById('btn-add-round').addEventListener('click', async () => {
+    const errEl = document.getElementById('round-entry-error');
+    errEl.classList.add('hidden');
 
-  document.getElementById('shoot-moon-buttons').innerHTML = g.players.map(p =>
-    `<button type="button" class="btn-moon" data-id="${p.id}">🌙 ${escHtml(p.name)}</button>`
-  ).join('');
-
-  document.getElementById('round-score-inputs').innerHTML = g.players.map(p =>
-    `<div class="round-input-row">
-      <label>${escHtml(p.name)}</label>
-      <input type="number" class="score-input" data-id="${p.id}" min="0" max="26" value="0" />
-    </div>`
-  ).join('');
-
-  document.getElementById('round-error').classList.add('hidden');
-  updateRoundTotal();
-
-  document.querySelectorAll('.score-input').forEach(inp =>
-    inp.addEventListener('input', updateRoundTotal)
-  );
-
-  document.querySelectorAll('.btn-moon').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const shooterId = Number(btn.dataset.id);
-      document.querySelectorAll('.score-input').forEach(inp => {
-        inp.value = Number(inp.dataset.id) === shooterId ? 0 : 26;
-      });
-      updateRoundTotal();
-    });
-  });
-
-  document.getElementById('modal-overlay').classList.remove('hidden');
-}
-
-function updateRoundTotal() {
-  const total = Array.from(document.querySelectorAll('.score-input'))
-    .reduce((sum, inp) => sum + (parseInt(inp.value) || 0), 0);
-  const el = document.getElementById('round-total-display');
-  el.textContent = total;
-  el.className = 'round-total ' + (total === 26 ? 'ok' : total === 0 ? '' : 'warn');
-}
-
-function closeModal() {
-  document.getElementById('modal-overlay').classList.add('hidden');
-}
-
-function initModal() {
-  document.getElementById('modal-close').addEventListener('click', closeModal);
-  document.getElementById('btn-cancel-round').addEventListener('click', closeModal);
-  document.getElementById('modal-overlay').addEventListener('click', e => {
-    if (e.target === e.currentTarget) closeModal();
-  });
-
-  document.getElementById('btn-confirm-round').addEventListener('click', async () => {
-    const scores = Array.from(document.querySelectorAll('.score-input')).map(inp => ({
-      playerId: Number(inp.dataset.id),
-      score: parseInt(inp.value) || 0,
-    }));
-    const total = scores.reduce((s, x) => s + x.score, 0);
-    const errEl = document.getElementById('round-error');
-
-    if (total !== 26 && total !== 0) {
-      errEl.textContent = `Scores should total 26 (currently ${total}). Use 🌙 for shoot the moon.`;
+    let scores;
+    try { scores = buildRoundScores(); }
+    catch (err) {
+      errEl.textContent = err.message;
       errEl.classList.remove('hidden');
       return;
     }
-    errEl.classList.add('hidden');
 
     try {
       await saveRound(currentGameId, scores);
@@ -441,14 +396,43 @@ function initModal() {
           .eq('id', currentGameId);
         currentGameData = await fetchGame(currentGameId);
       }
-
-      closeModal();
       renderGame();
     } catch (err) {
       errEl.textContent = err.message;
       errEl.classList.remove('hidden');
     }
   });
+}
+
+function buildRoundScores() {
+  const g = currentGameData;
+
+  if (moonPlayerId !== null) {
+    const scores = g.players.map(p => ({
+      playerId: p.id,
+      score: p.id === moonPlayerId ? 0 : 26,
+    }));
+    if (jodPlayerId !== null) {
+      const jod = scores.find(s => s.playerId === jodPlayerId);
+      if (jod) jod.score -= 10;
+    }
+    return scores;
+  }
+
+  const inputs = Array.from(document.querySelectorAll('.score-number-input'));
+  const scores = inputs.map(inp => ({
+    playerId: Number(inp.dataset.id),
+    score: parseInt(inp.value) || 0,
+  }));
+
+  const total = scores.reduce((s, x) => s + x.score, 0);
+  if (total !== 26) throw new Error(`Scores must sum to 26 (currently ${total})`);
+
+  if (jodPlayerId !== null) {
+    const jod = scores.find(s => s.playerId === jodPlayerId);
+    if (jod) jod.score -= 10;
+  }
+  return scores;
 }
 
 /* ── Helpers ── */
@@ -464,27 +448,20 @@ async function boot() {
   initDashboard();
   initNewGame();
   initGameView();
-  initModal();
 
   db.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN') {
       currentUser = session.user;
       showDashboard();
     } else if (event === 'SIGNED_OUT') {
-      currentUser     = null;
-      currentGameId   = null;
-      currentGameData = null;
+      currentUser = null; currentGameId = null; currentGameData = null;
       showView('view-auth');
     }
   });
 
   const { data: { session } } = await db.auth.getSession();
-  if (session) {
-    currentUser = session.user;
-    showDashboard();
-  } else {
-    showView('view-auth');
-  }
+  if (session) { currentUser = session.user; showDashboard(); }
+  else showView('view-auth');
 }
 
 document.addEventListener('DOMContentLoaded', boot);
