@@ -310,8 +310,11 @@ function renderRoundEntry(g) {
   document.getElementById('next-round-num').textContent = g.rounds.length + 1;
   document.getElementById('round-entry-error').classList.add('hidden');
 
+  const gridCols = `grid-template-columns: repeat(${g.players.length}, 1fr)`;
+
   const makeBtns = (containerId, onSelect) => {
     const el = document.getElementById(containerId);
+    el.setAttribute('style', gridCols);
     el.innerHTML = g.players.map(p =>
       `<button type="button" class="player-select-btn" data-id="${p.id}">${escHtml(p.name)}</button>`
     ).join('');
