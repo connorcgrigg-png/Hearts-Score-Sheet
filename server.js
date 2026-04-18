@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const db = require('./db');
 const authRoutes = require('./routes/auth');
 const gameRoutes = require('./routes/games');
 
@@ -16,4 +17,7 @@ app.get('*', (_req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Hearts Score Sheet running on http://localhost:${PORT}`));
+
+db.init()
+  .then(() => app.listen(PORT, () => console.log(`Hearts Score Sheet running on http://localhost:${PORT}`)))
+  .catch(err => { console.error('Failed to connect to database:', err.message); process.exit(1); });

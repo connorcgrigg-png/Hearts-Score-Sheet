@@ -6,45 +6,47 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.get('/', (req, res) => {
-  const games = db.prepare(`
+router.get('/', async (req, res) => {
+  const games = await db.all(`
     SELECT g.id, g.name, g.created_at, g.completed_at, g.is_complete,
-           COUNT(DISTINCT r.id) AS round_count,
-           COUNT(DISTINCT gp.id) AS player_count
+           COUNT(DISTINCT r.id)::integer  AS round_count,
+           COUNT(DISTINCT gp.id)::integer AS player_count
     FROM games g
     LEFT JOIN rounds r ON r.game_id = g.id
     LEFT JOIN game_players gp ON gp.game_id = g.id
-    WHERE g.created_by = ?
+    WHERE g.created_by = $1
     GROUP BY g.id
     ORDER BY g.created_at DESC
-  `).all(req.user.userId);
+  `, [req.user.userId]);
   res.json(games);
 });
 
-router.get('/:id', (req, res) => {
-  const game = db.prepare(
-    'SELECT * FROM games WHERE id = ? AND created_by = ?'
-  ).get(req.params.id, req.user.userId);
+router.get('/:id', async (req, res) => {
+  const game = await db.get(
+    'SELECT * FROM games WHERE id = $1 AND created_by = $2',
+    [req.params.id, req.user.userId]
+  );
   if (!game) return res.status(404).json({ error: 'Game not found' });
 
-  const players = db.prepare(
-    'SELECT * FROM game_players WHERE game_id = ? ORDER BY position'
-  ).all(game.id);
-
-  const rounds = db.prepare(
-    'SELECT * FROM rounds WHERE game_id = ? ORDER BY round_number'
-  ).all(game.id);
-
-  const getScores = db.prepare('SELECT * FROM round_scores WHERE round_id = ?');
-  const roundsWithScores = rounds.map(round => ({
-    ...round,
-    scores: getScores.all(round.id),
-  }));
+  const players = await db.all(
+    'SELECT * FROM game_players WHERE game_id = $1 ORDER BY position',
+    [game.id]
+  );
+  const rounds = await db.all(
+    'SELECT * FROM rounds WHERE game_id = $1 ORDER BY round_number',
+    [game.id]
+  );
+  const roundsWithScores = await Promise.all(
+    rounds.map(async round => ({
+      ...round,
+      scores: await db.all('SELECT * FROM round_scores WHERE round_id = $1', [round.id]),
+    }))
+  );
 
   res.json({ ...game, players, rounds: roundsWithScores });
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { name, players } = req.body || {};
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Game name is required' });
@@ -57,25 +59,27 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'All player names must be non-empty' });
   }
 
-  const gameResult = db.prepare(
-    'INSERT INTO games (name, created_by) VALUES (?, ?)'
-  ).run(name.trim(), req.user.userId);
-  const gameId = gameResult.lastInsertRowid;
-
-  const insertPlayer = db.prepare(
-    'INSERT INTO game_players (game_id, name, position) VALUES (?, ?, ?)'
+  const game = await db.get(
+    'INSERT INTO games (name, created_by) VALUES ($1, $2) RETURNING id',
+    [name.trim(), req.user.userId]
   );
-  trimmed.forEach((playerName, i) => insertPlayer.run(gameId, playerName, i));
+  for (let i = 0; i < trimmed.length; i++) {
+    await db.query(
+      'INSERT INTO game_players (game_id, name, position) VALUES ($1, $2, $3)',
+      [game.id, trimmed[i], i]
+    );
+  }
 
-  res.json({ id: gameId });
+  res.json({ id: game.id });
 });
 
-router.post('/:id/rounds', (req, res) => {
+router.post('/:id/rounds', async (req, res) => {
   const { scores } = req.body || {};
 
-  const game = db.prepare(
-    'SELECT * FROM games WHERE id = ? AND created_by = ?'
-  ).get(req.params.id, req.user.userId);
+  const game = await db.get(
+    'SELECT * FROM games WHERE id = $1 AND created_by = $2',
+    [req.params.id, req.user.userId]
+  );
   if (!game) return res.status(404).json({ error: 'Game not found' });
   if (game.is_complete) return res.status(400).json({ error: 'Game is already complete' });
 
@@ -88,75 +92,81 @@ router.post('/:id/rounds', (req, res) => {
     }
   }
 
-  const lastRound = db.prepare(
-    'SELECT MAX(round_number) AS max FROM rounds WHERE game_id = ?'
-  ).get(game.id);
+  const lastRound = await db.get(
+    'SELECT MAX(round_number) AS max FROM rounds WHERE game_id = $1',
+    [game.id]
+  );
   const roundNumber = (lastRound.max || 0) + 1;
 
-  const roundResult = db.prepare(
-    'INSERT INTO rounds (game_id, round_number) VALUES (?, ?)'
-  ).run(game.id, roundNumber);
-  const roundId = roundResult.lastInsertRowid;
-
-  const insertScore = db.prepare(
-    'INSERT INTO round_scores (round_id, player_id, score) VALUES (?, ?, ?)'
+  const round = await db.get(
+    'INSERT INTO rounds (game_id, round_number) VALUES ($1, $2) RETURNING id',
+    [game.id, roundNumber]
   );
-  scores.forEach(({ playerId, score }) => insertScore.run(roundId, playerId, score));
-
-  const totals = db.prepare(`
-    SELECT SUM(rs.score) AS total
-    FROM round_scores rs
-    JOIN rounds r ON r.id = rs.round_id
-    WHERE r.game_id = ? AND rs.player_id = ?
-  `);
-  const players = db.prepare(
-    'SELECT id FROM game_players WHERE game_id = ?'
-  ).all(game.id);
-
-  const gameOver = players.some(p => {
-    const row = totals.get(game.id, p.id);
-    return row && row.total >= 100;
-  });
-
-  if (gameOver) {
-    db.prepare(
-      'UPDATE games SET is_complete = 1, completed_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(game.id);
+  for (const { playerId, score } of scores) {
+    await db.query(
+      'INSERT INTO round_scores (round_id, player_id, score) VALUES ($1, $2, $3)',
+      [round.id, playerId, score]
+    );
   }
 
-  res.json({ roundId, roundNumber, gameOver });
+  const players = await db.all(
+    'SELECT id FROM game_players WHERE game_id = $1',
+    [game.id]
+  );
+  const totals = await Promise.all(
+    players.map(p => db.get(`
+      SELECT COALESCE(SUM(rs.score), 0)::integer AS total
+      FROM round_scores rs
+      JOIN rounds r ON r.id = rs.round_id
+      WHERE r.game_id = $1 AND rs.player_id = $2
+    `, [game.id, p.id]))
+  );
+  const gameOver = totals.some(row => row && row.total >= 100);
+
+  if (gameOver) {
+    await db.query(
+      'UPDATE games SET is_complete = TRUE, completed_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [game.id]
+    );
+  }
+
+  res.json({ roundId: round.id, roundNumber, gameOver });
 });
 
-router.delete('/:id/rounds/last', (req, res) => {
-  const game = db.prepare(
-    'SELECT * FROM games WHERE id = ? AND created_by = ?'
-  ).get(req.params.id, req.user.userId);
+router.delete('/:id/rounds/last', async (req, res) => {
+  const game = await db.get(
+    'SELECT * FROM games WHERE id = $1 AND created_by = $2',
+    [req.params.id, req.user.userId]
+  );
   if (!game) return res.status(404).json({ error: 'Game not found' });
 
-  const lastRound = db.prepare(
-    'SELECT * FROM rounds WHERE game_id = ? ORDER BY round_number DESC LIMIT 1'
-  ).get(game.id);
+  const lastRound = await db.get(
+    'SELECT * FROM rounds WHERE game_id = $1 ORDER BY round_number DESC LIMIT 1',
+    [game.id]
+  );
   if (!lastRound) return res.status(400).json({ error: 'No rounds to undo' });
 
-  db.prepare('DELETE FROM round_scores WHERE round_id = ?').run(lastRound.id);
-  db.prepare('DELETE FROM rounds WHERE id = ?').run(lastRound.id);
+  await db.query('DELETE FROM round_scores WHERE round_id = $1', [lastRound.id]);
+  await db.query('DELETE FROM rounds WHERE id = $1', [lastRound.id]);
 
   if (game.is_complete) {
-    db.prepare(
-      'UPDATE games SET is_complete = 0, completed_at = NULL WHERE id = ?'
-    ).run(game.id);
+    await db.query(
+      'UPDATE games SET is_complete = FALSE, completed_at = NULL WHERE id = $1',
+      [game.id]
+    );
   }
 
   res.json({ success: true });
 });
 
-router.delete('/:id', (req, res) => {
-  const game = db.prepare(
-    'SELECT * FROM games WHERE id = ? AND created_by = ?'
-  ).get(req.params.id, req.user.userId);
+router.delete('/:id', async (req, res) => {
+  const game = await db.get(
+    'SELECT * FROM games WHERE id = $1 AND created_by = $2',
+    [req.params.id, req.user.userId]
+  );
   if (!game) return res.status(404).json({ error: 'Game not found' });
 
-  db.prepare('DELETE FROM games WHERE id = ?').run(game.id);
+  await db.query('DELETE FROM games WHERE id = $1', [game.id]);
   res.json({ success: true });
 });
 

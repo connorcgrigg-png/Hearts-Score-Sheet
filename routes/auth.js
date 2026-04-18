@@ -20,15 +20,16 @@ router.post('/register', async (req, res) => {
 
   const hash = await bcrypt.hash(password, 10);
   try {
-    const result = db.prepare(
-      'INSERT INTO users (username, password_hash) VALUES (?, ?)'
-    ).run(username.trim(), hash);
+    const row = await db.get(
+      'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username',
+      [username.trim(), hash]
+    );
     const token = jwt.sign(
-      { userId: result.lastInsertRowid, username: username.trim() },
+      { userId: row.id, username: row.username },
       JWT_SECRET,
       { expiresIn: '30d' }
     );
-    res.json({ token, username: username.trim() });
+    res.json({ token, username: row.username });
   } catch {
     res.status(409).json({ error: 'Username is already taken' });
   }
@@ -40,7 +41,10 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
+  const user = await db.get(
+    'SELECT * FROM users WHERE LOWER(username) = LOWER($1)',
+    [username.trim()]
+  );
   if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
   const valid = await bcrypt.compare(password, user.password_hash);
