@@ -392,7 +392,7 @@ function initGameView() {
       currentGameData = await fetchGame(currentGameId);
 
       const totals  = calcTotals(currentGameData);
-      const gameOver = Object.values(totals).some(t => t >= 100);
+      const gameOver = currentGameData.rounds.length >= 4;
       if (gameOver) {
         await db.from('games')
           .update({ is_complete: true, completed_at: new Date().toISOString() })
