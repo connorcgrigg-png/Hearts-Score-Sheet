@@ -1,5 +1,5 @@
 node_modules/
-hearts.db
+*.db
 *.db-shm
 *.db-wal
 .env

@@ -25,8 +25,8 @@
 
       <form id="form-login" class="auth-form">
         <div class="field">
-          <label for="login-username">Username</label>
-          <input id="login-username" type="text" autocomplete="username" required />
+          <label for="login-email">Email</label>
+          <input id="login-email" type="email" autocomplete="email" required />
         </div>
         <div class="field">
           <label for="login-password">Password</label>
@@ -38,14 +38,15 @@
 
       <form id="form-register" class="auth-form hidden">
         <div class="field">
-          <label for="reg-username">Username</label>
-          <input id="reg-username" type="text" autocomplete="username" required />
+          <label for="reg-email">Email</label>
+          <input id="reg-email" type="email" autocomplete="email" required />
         </div>
         <div class="field">
           <label for="reg-password">Password</label>
           <input id="reg-password" type="password" autocomplete="new-password" required />
         </div>
         <div id="register-error" class="form-error hidden"></div>
+        <div id="register-success" class="form-success hidden"></div>
         <button type="submit" class="btn btn-primary btn-block">Create Account</button>
       </form>
     </div>
@@ -92,18 +93,10 @@
         <div class="field">
           <label>Players <span class="hint">(2–6)</span></label>
           <div id="player-inputs">
-            <div class="player-row">
-              <input type="text" class="player-name" placeholder="Player 1" required />
-            </div>
-            <div class="player-row">
-              <input type="text" class="player-name" placeholder="Player 2" required />
-            </div>
-            <div class="player-row">
-              <input type="text" class="player-name" placeholder="Player 3" required />
-            </div>
-            <div class="player-row">
-              <input type="text" class="player-name" placeholder="Player 4" required />
-            </div>
+            <div class="player-row"><input type="text" class="player-name" placeholder="Player 1" required /></div>
+            <div class="player-row"><input type="text" class="player-name" placeholder="Player 2" required /></div>
+            <div class="player-row"><input type="text" class="player-name" placeholder="Player 3" required /></div>
+            <div class="player-row"><input type="text" class="player-name" placeholder="Player 4" required /></div>
           </div>
           <div class="player-controls">
             <button type="button" id="btn-add-player" class="btn btn-ghost btn-sm">+ Add Player</button>
@@ -134,13 +127,9 @@
 
       <div class="score-table-wrap">
         <table id="score-table" class="score-table">
-          <thead>
-            <tr id="score-header"></tr>
-          </thead>
+          <thead><tr id="score-header"></tr></thead>
           <tbody id="score-body"></tbody>
-          <tfoot>
-            <tr id="score-totals"></tr>
-          </tfoot>
+          <tfoot><tr id="score-totals"></tr></tfoot>
         </table>
       </div>
 
@@ -179,6 +168,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/app.js"></script>
 </body>
 </html>

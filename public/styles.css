@@ -141,6 +141,15 @@ input:focus {
   padding: 8px 12px;
 }
 
+.form-success {
+  background: rgba(62, 207, 142, 0.12);
+  border: 1px solid rgba(62, 207, 142, 0.3);
+  border-radius: 6px;
+  color: var(--green);
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
 /* ── Buttons ── */
 .btn {
   border: none;
