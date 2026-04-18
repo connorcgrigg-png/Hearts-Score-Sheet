@@ -2,8 +2,8 @@
 // Replace these two values with your project's URL and anon key.
 // Both are safe to commit — they're public keys protected by Row Level Security.
 // Find them at: supabase.com → your project → Settings → API
-const SUPABASE_URL      = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL      = 'https://rwfzduvhdudmptqsczuo.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3ZnpkdXZoZHVkbXB0cXNjenVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0NjQwNzIsImV4cCI6MjA5MjA0MDA3Mn0.3E4lxIIjlHQtQPpDuASTLZjeyqY8RrIbZt79eEFcFdI';
 // ─────────────────────────────────────────────────────────────────────────
 
 const { createClient } = window.supabase;
