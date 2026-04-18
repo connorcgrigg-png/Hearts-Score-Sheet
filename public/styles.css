@@ -252,6 +252,31 @@ input:focus { outline: none; border-color: var(--gold); }
 .badge.complete { background: rgba(74,138,104,0.12); color: var(--green); }
 .badge.active   { background: rgba(201,169,110,0.1); color: var(--gold); }
 
+.game-card-scores {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  padding-top: 10px;
+}
+
+.game-score-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.game-score-row.winner {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.game-score-pts { font-variant-numeric: tabular-nums; }
+
 .game-card-date { color: var(--muted); font-size: 12px; }
 
 .empty-state {

@@ -76,36 +76,58 @@ async function showDashboard() {
 
   const { data: rawGames } = await db
     .from('games')
-    .select('id, name, created_at, completed_at, is_complete, game_players(id), rounds(id)')
+    .select(`
+      id, name, created_at, completed_at, is_complete,
+      game_players(id, name, position),
+      rounds(round_scores(player_id, score))
+    `)
     .order('created_at', { ascending: false });
 
-  const games = (rawGames || []).map(g => ({
-    ...g,
-    player_count: g.game_players.length,
-    round_count:  g.rounds.length,
-  }));
-
   const list = document.getElementById('games-list');
-  if (!games.length) {
+  if (!rawGames || !rawGames.length) {
     list.innerHTML = '<p class="empty-state">No games yet. Start a new one!</p>';
     return;
   }
 
-  list.innerHTML = games.map(g => {
+  list.innerHTML = rawGames.map(g => {
     const date = new Date(g.created_at).toLocaleDateString(undefined, {
       month: 'short', day: 'numeric', year: 'numeric',
     });
+    const players = [...g.game_players].sort((a, b) => a.position - b.position);
     const statusBadge = g.is_complete
       ? '<span class="badge complete">Complete</span>'
       : '<span class="badge active">In Progress</span>';
+
+    let scoresHtml = '';
+    if (g.is_complete && players.length) {
+      const totals = {};
+      players.forEach(p => { totals[p.id] = 0; });
+      g.rounds.forEach(r => (r.round_scores || []).forEach(s => {
+        totals[s.player_id] = (totals[s.player_id] || 0) + s.score;
+      }));
+      const minScore = Math.min(...players.map(p => totals[p.id] || 0));
+
+      scoresHtml = `<div class="game-card-scores">
+        ${players.map(p => {
+          const score = totals[p.id] || 0;
+          const isWinner = score === minScore;
+          return `<div class="game-score-row${isWinner ? ' winner' : ''}">
+            <span class="game-score-name">${isWinner ? '♥ ' : ''}${escHtml(p.name)}</span>
+            <span class="game-score-pts">${score}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
     return `
       <div class="game-card ${g.is_complete ? 'complete' : ''}" data-id="${g.id}">
         <div class="game-card-title">${escHtml(g.name)}</div>
         <div class="game-card-meta">
           ${statusBadge}
-          <span class="badge">${g.player_count} players</span>
-          <span class="badge">${g.round_count} rounds</span>
+          <span class="badge">${players.length} players</span>
+          <span class="badge">${g.rounds.length} rounds</span>
         </div>
+        ${scoresHtml}
         <div class="game-card-date">${date}</div>
       </div>`;
   }).join('');
